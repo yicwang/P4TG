@@ -34,6 +34,9 @@ const ether_type_t ETHERTYPE_MPLS = 0x8847;
 const bit<8> IP_PROTOCOL_UDP = 17;
 const bit<8> IP_PROTOCOL_P4TG = 110;
 
+const bit<16> UDP_PORT_VXLAN = 4789;
+const mac_addr_t BVS_MAGIC_SRC_MAC  = 48w0x0abdbd010000;
+const mac_addr_t BVS_MAGIC_DST_MAC  = 48w0xfeffffffffff;
 
 
 header ethernet_h {
@@ -119,8 +122,20 @@ header udp_t {
     bit<16> checksum;
 }
 
+// VXLAN -- RFC 7348
+header vxlan_t {
+    bit<8> flags;
+    bit<24> reserved;
+    bit<24> vni;
+    bit<8> reserved2;
+}
 
 struct header_t {
+    ethernet_h outer_ethernet;
+    ipv4_t outer_ipv4;
+    udp_t outer_udp;
+    vxlan_t vxlan;
+
     ethernet_h ethernet;
     mpls_h[15] mpls_stack;
     ipv4_t ipv4;
@@ -132,7 +147,6 @@ struct header_t {
     q_in_q_t q_in_q;
 
 }
-
 
 struct ingress_metadata_t {
     bool checksum_err;
@@ -149,10 +163,20 @@ struct ingress_metadata_t {
     PortId_t ig_port;
 }
 
+struct checksum_md_t {
+    ipv4_addr_t inner_ipv4_src_addr_ones_complement;
+    ipv4_addr_t inner_ipv4_dst_addr_ones_complement;
+    bit<8> checksum_all_ones_8b;
+    bit<8> inner_ipv4_protocol_ones_complement;
+    bit<16> inner_ipv4_payload_length_ones_complement;
+    bit<16> inner_ipv4_payload_length;
+}
+
 struct egress_metadata_t {
     bit<1> monitor_type;
     PortId_t rx_port;
     bit<16> checksum_udp_tmp;
+    checksum_md_t checksum_md;
 }
 
 struct iat_rtt_monitor_t {

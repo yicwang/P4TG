@@ -117,6 +117,77 @@ control egress(
         size = 256;
     }
 
+    action checksum_preprocess() {
+        eg_md.checksum_md.inner_ipv4_src_addr_ones_complement = ~hdr.ipv4.src_addr;
+        eg_md.checksum_md.inner_ipv4_dst_addr_ones_complement = ~hdr.ipv4.dst_addr;
+        eg_md.checksum_md.checksum_all_ones_8b = ~(8w0);
+        eg_md.checksum_md.inner_ipv4_protocol_ones_complement = ~(IP_PROTOCOL_UDP);
+        eg_md.checksum_md.inner_ipv4_payload_length_ones_complement = ~eg_md.checksum_md.inner_ipv4_payload_length;
+    }
+
+    action action_encap_pkt_udp_v4() {
+        hdr.outer_ethernet.setValid();
+        hdr.outer_ethernet.ether_type = ETHERTYPE_IPV4;
+        hdr.outer_ethernet.src_addr = hdr.ethernet.src_addr;
+        hdr.outer_ethernet.dst_addr = hdr.ethernet.dst_addr;
+
+        hdr.outer_ipv4.setValid();
+        hdr.outer_ipv4.version = 4w4;
+        hdr.outer_ipv4.ihl = 4w5;
+        hdr.outer_ipv4.total_len = hdr.ipv4.total_len + 16w50;
+        hdr.outer_ipv4.identification = 1234; // Can change;
+        hdr.outer_ipv4.flags = 3w0;
+        hdr.outer_ipv4.frag_offset = 13w0;
+        hdr.outer_ipv4.ttl = 64;
+        hdr.outer_ipv4.protocol = IP_PROTOCOL_UDP;
+        hdr.outer_ipv4.hdr_checksum = 16w0;
+        hdr.outer_ipv4.src_addr = 32w0; // will be changed later
+        hdr.outer_ipv4.dst_addr = 32w0; // will be changed later. 10.249.243.224
+
+        hdr.outer_udp.setValid();
+        hdr.outer_udp.dst_port = UDP_PORT_VXLAN;
+        hdr.outer_udp.src_port = 1234; // Can change
+        hdr.outer_udp.len = hdr.ipv4.total_len + 16w30;
+        hdr.outer_udp.checksum = 16w0;
+
+        hdr.vxlan.setValid();
+        hdr.vxlan.vni = (bit<24>)eg_intr_md.egress_port;
+        hdr.vxlan.flags = 0x8;
+        hdr.vxlan.reserved2 = 8w0;
+
+        //hdr.ethernet.src_addr = BVS_MAGIC_SRC_MAC;
+        //hdr.ethernet.dst_addr = BVS_MAGIC_DST_MAC;
+        
+        eg_md.checksum_md.inner_ipv4_payload_length = hdr.ipv4.total_len - (bit<16>)sizeInBytes(hdr.ipv4);
+    }
+
+    action action_modify_outer_ipv4(ipv4_addr_t src_ip, ipv4_addr_t dst_ip) {
+        hdr.outer_ipv4.src_addr = src_ip;
+        hdr.outer_ipv4.dst_addr = dst_ip;
+    }
+
+    table outer_ipv4_table {
+        key = {
+            eg_intr_md.egress_port: exact;
+        }
+        actions = {
+            action_modify_outer_ipv4;
+        }
+        const entries = {
+            (256) : action_modify_outer_ipv4(32w0x64428e6e, 32w0x64428e6c); // 100.66.142.110 -> 100.66.142.108
+            (260) : action_modify_outer_ipv4(32w0x64428f6e, 32w0x64428f6c); // 100.66.143.110 -> 100.66.143.108
+            (264) : action_modify_outer_ipv4(32w0x6442906e, 32w0x6442906c); // 100.66.144.110 -> 100.66.144.108
+            (268) : action_modify_outer_ipv4(32w0x6442916e, 32w0x6442916c); // 100.66.145.110 -> 100.66.145.108
+            (272) : action_modify_outer_ipv4(32w0x6442926e, 32w0x6442926c); // 100.66.146.110 -> 100.66.146.108
+            (276) : action_modify_outer_ipv4(32w0x6442936e, 32w0x6442936c); // 100.66.147.110 -> 100.66.147.108
+            (280) : action_modify_outer_ipv4(32w0x6442946e, 32w0x6442946c); // 100.66.148.110 -> 100.66.148.108
+            (284) : action_modify_outer_ipv4(32w0x6442956e, 32w0x6442956c); // 100.66.149.110 -> 100.66.149.108
+            (440) : action_modify_outer_ipv4(32w0x64428e6e, 32w0x64428e6c); // 100.66.142.110 -> 100.66.142.108
+            (444) : action_modify_outer_ipv4(32w0x64428f6e, 32w0x64428f6c); // 100.66.143.110 -> 100.66.143.108
+        }
+        size = 16;
+    }
+
     apply {
         bit<64> app_count = 0;
 
@@ -169,6 +240,9 @@ control egress(
 
             frame_size_monitor.apply();
 
+            action_encap_pkt_udp_v4();
+            outer_ipv4_table.apply();
+            checksum_preprocess();
         }
 
 

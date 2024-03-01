@@ -74,6 +74,7 @@ parser SwitchIngressParser(
     }
 
     state parse_ethernet {
+        pkt.advance(50 * 8);
         pkt.extract(hdr.ethernet);
         transition select(hdr.ethernet.ether_type) {
             ETHERTYPE_MONITOR: parse_monitor;
@@ -257,6 +258,8 @@ control SwitchEgressDeparser(
         in egress_metadata_t eg_md,
         in egress_intrinsic_metadata_for_deparser_t eg_dprsr_md) {
 
+    Checksum() outer_ipv4_checksum;
+    Checksum() outer_udp_checksum;
     Checksum() ipv4_checksum;
 
     #if __NO_UDP_CHECKSUM__ == 0
@@ -264,6 +267,44 @@ control SwitchEgressDeparser(
     #endif
 
     apply {
+
+        hdr.outer_ipv4.hdr_checksum = outer_ipv4_checksum.update(
+            {hdr.outer_ipv4.version,
+             hdr.outer_ipv4.ihl,
+             hdr.outer_ipv4.diffserv,
+             hdr.outer_ipv4.total_len,
+             hdr.outer_ipv4.identification,
+             hdr.outer_ipv4.flags,
+             hdr.outer_ipv4.frag_offset,
+             hdr.outer_ipv4.ttl,
+             hdr.outer_ipv4.protocol,
+             hdr.outer_ipv4.src_addr,
+             hdr.outer_ipv4.dst_addr});
+
+        hdr.outer_udp.checksum = outer_udp_checksum.update(
+            {hdr.outer_ipv4.src_addr,
+            hdr.outer_ipv4.dst_addr,
+            8w0, hdr.outer_ipv4.protocol,
+            hdr.outer_udp.len,
+
+            hdr.outer_udp.src_port,
+            hdr.outer_udp.dst_port,
+            hdr.outer_udp.len,
+
+            hdr.vxlan.flags,
+            hdr.vxlan.reserved,
+            hdr.vxlan.vni,
+            hdr.vxlan.reserved2,
+
+            hdr.ethernet.dst_addr,
+            hdr.ethernet.src_addr,
+            hdr.ethernet.ether_type,
+
+            eg_md.checksum_md.inner_ipv4_src_addr_ones_complement,
+            eg_md.checksum_md.inner_ipv4_dst_addr_ones_complement,
+            eg_md.checksum_md.checksum_all_ones_8b,
+            eg_md.checksum_md.inner_ipv4_protocol_ones_complement,
+            eg_md.checksum_md.inner_ipv4_payload_length_ones_complement});
 
         hdr.ipv4.hdr_checksum = ipv4_checksum.update(
             {hdr.ipv4.version,
@@ -289,6 +330,10 @@ control SwitchEgressDeparser(
             }, zeros_as_ones = true);
         #endif
 
+        pkt.emit(hdr.outer_ethernet);
+        pkt.emit(hdr.outer_ipv4);
+        pkt.emit(hdr.outer_udp);
+        pkt.emit(hdr.vxlan);
         pkt.emit(hdr.ethernet);
         pkt.emit(hdr.mpls_stack);
         pkt.emit(hdr.vlan);
